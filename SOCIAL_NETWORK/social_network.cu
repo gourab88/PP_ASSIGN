@@ -20,6 +20,7 @@
 #include <iostream>
 #include <map>
 #include <time.h>
+ 
 
 
 
@@ -35,7 +36,7 @@
 #define INITIAL_WEIGHT_GL 100
 #define INITIAL_WEIGHT_LL 100
 #define GLOBAL_DECAY_RATE 0.05
-#define LOCAL_DECAY_RATE 0.3
+#define LOCAL_DECAY_RATE 0.05
 #define SAMPLING_INTERVAL 6
 #define WEIGHT_THRESOLD 0.01
  
@@ -73,6 +74,7 @@ __global__ void  Take_Action_Kernel(int *v_graph_device,int *e_graph_device,floa
                                     short *count_device,int *no_of_topics_device,float *current_time_device,int *result_device
                                     ,curandState * state, unsigned long seed)
 {
+      clock_t start_parallel_device= clock();
      
     unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
  
@@ -170,7 +172,7 @@ __global__ void  Take_Action_Kernel(int *v_graph_device,int *e_graph_device,floa
    //Update with new weights
    //bookkeeping of no of copies of topics
    
-  
+   clock_t end_parallel_device= clock();
    
    if(index==0)
     {
@@ -240,14 +242,19 @@ __global__ void  Take_Action_Kernel(int *v_graph_device,int *e_graph_device,floa
 
 
 
-void Take_Action_serial(int *v_graph,int *e_graph ,float*local_list,float*global_list,int no_of_topics,float current_time,int *result,int user)
+void Take_Action_serial(int *v_graph,int *e_graph ,float*local_list,float*global_list,int no_of_topics,float current_time,int *result,int user,short * active_now)
 {
 
-	float weights[500];
-    float roulette_wheel[500];
+	
+	//printf("user :%d\n\n",user);
+	float weights[800];
+    float roulette_wheel[800];
     int current_index,count=0,i,j;
     float weight,sum=0.0f,x=0.0f;
     int neighbours,last_change,N;
+    
+    if(active_now[user]==0)
+    	return;
     
     
     neighbours=v_graph[user+1]-v_graph[user];
@@ -349,7 +356,8 @@ int main(void)
     float *local_list,*global_list;
     short  *active_now,*active_element_ids,count;
     float current_inteval_start,current_interval_end,current_time;
-    int i,j,a,n,topic,user;
+    int i,j,a,topic;
+    unsigned long long int n;
     int **topic_book_keeping;
     
     float **user_action,weight;
@@ -364,14 +372,16 @@ int main(void)
     short  *active_element_ids_device, *count_device,* active_now_device;
     float *current_time_device;
     int *no_of_topics_device,*zero_array;
+   // uint kernelTime;
     
     
     double common_time;
-    double parallel_time=0.0;
+    double parallel_time=0.0f;
     double serial_time;
     double total_parallel;
     double total_serial;
     double speed_up;
+    double speed_up2;
     
   
     
@@ -397,7 +407,7 @@ int main(void)
    
     user_action=(float**)malloc(NO_OF_USER*sizeof(float*));
     for(j=0;j<NO_OF_USER;j++)
-		 user_action[j]=(float*)malloc(no_of_iteration*sizeof(float)); 
+		 user_action[j]=(float*)malloc((no_of_iteration+1)*sizeof(float)); 
 	
     
     
@@ -486,7 +496,7 @@ int main(void)
    
    
  
-    for(i=0;i<4;i++)
+    for(i=0;i<no_of_iteration;i++)
     {
         count=0;
         current_inteval_start=SAMPLING_INTERVAL*i;
@@ -557,16 +567,21 @@ int main(void)
        dim3 dimBlock(block_size);
        dim3 dimGrid(num_blocks);
        
-       clock_t start_parallel= clock();
+     clock_t start_parallel= clock();
+       
+      //  cutCreateTimer(&kernelTime);
+ 		//cutResetTimer(kernelTime);
        
      Take_Action_Kernel<<<dimGrid,dimBlock>>>(v_graph_device,e_graph_device,local_list_device,global_list_device,
                                                active_now_device,active_element_ids_device,count_device,no_of_topics_device,
                                                 current_time_device,result_device,devStates,unsigned(time(NULL)));
-                                                
-                                         
+                   
+                   
+       cudaThreadSynchronize();                                         
+      // cutStopTimer(kernelTime);                      
        clock_t end_parallel = clock();
        
-       parallel_time=parallel_time+ (double)(end_parallel - start_parallel) / CLOCKS_PER_SEC;
+       parallel_time=(double)(end_parallel - start_parallel) / CLOCKS_PER_SEC;
        
         array_size=no_of_topics*sizeof(int);
         cudaMemcpy(result, result_device,array_size,cudaMemcpyDeviceToHost);
@@ -612,6 +627,8 @@ int main(void)
  
  initialize_graph(global_list,local_list,topic_book_keeping);
  make_global_list(global_list);
+ generate_initial_action_time(user_action);
+ 
  
    printf("\n\nInitial status :"); 
            for(j=0;j<no_of_topics;j++)
@@ -667,10 +684,8 @@ int main(void)
   		
   		for(j=0;j<NO_OF_USER;j++)
   		{
-  			
-  		 	 if(active_now[j]==1)
-  			 
-  			 	Take_Action_serial(v_graph,e_graph ,local_list,global_list,no_of_topics,current_time,result,j);
+  			 	Take_Action_serial(v_graph,e_graph ,local_list,global_list,no_of_topics,current_time,result,j,active_now);
+ 
   		}
   		
   
@@ -683,20 +698,14 @@ int main(void)
             result[count]=0;
          }
           
-   
+  
    
           for(count=0;count<n;count++)
          {
-            user=count/(no_of_topics);
+           // user=count/(no_of_topics);
             topic=count%(no_of_topics);
-            if(active_now[user]==1)
-            {
-                if(local_list[count] > -1000.0f)
-                result[topic]++;
-            }
-            else
-            {
-                if(local_list[count] > -1000.0f)
+            // printf("topics=%d\n\n",topic);
+            if(local_list[count] > -1000.0f)
                     
                 {
                 
@@ -708,9 +717,11 @@ int main(void)
                           result[topic]++;
                     }
                 }
-            }
+            
             
          }
+         
+       //  printf("I m here\n\n");
          
          
      for(count=0;count<no_of_topics;count++)
@@ -740,8 +751,8 @@ int main(void)
   
   
   
-  clock_t end_serial = clock(); 
- 
+  
+ clock_t end_serial = clock(); 
   
   
   
@@ -753,17 +764,21 @@ int main(void)
   total_parallel=common_time+parallel_time;
   total_serial=common_time+serial_time;
   speed_up=total_serial/total_parallel;
-  //speed_up=serial_time/parallel_time;
+  speed_up2=serial_time/parallel_time;
   
   
     
- 
+ /*
   printf("\n\nCommon time Elapsed: %f seconds\n",  common_time);  
   printf("\n\nParallel time Elapsed: %f seconds\n", parallel_time);
   printf("\n\nSerial time Elapsed: %f seconds\n",  serial_time);
   printf("\n\nTotal time Elapsed(Palallel execution): %f seconds\n",total_parallel);
-  printf("\n\nTotal time Elapsed(Palallel execution): %f seconds\n",total_serial);
+  printf("\n\nTotal time Elapsed(serial execution): %f seconds\n",total_serial);
   printf("\n\nSpeed up :%f\n\n",speed_up);
+  printf("\n\nSpeed up2 :%f\n\n",speed_up2);
+  // printf ("Time for the kernel: %f ms\n", cutGetTimerValue(kernelTime));
+  
+  */
  
    free(v_graph);
    free(e_graph);
@@ -1009,7 +1024,7 @@ void generate_initial_action_time(float **user_action)
        t=0.0f;
        r=0.0f;
        
-       for(j=0;j<no_of_iteration;j++)
+       for(j=0;j<no_of_iteration+1;j++)
        {
         srand(rand());
         r=(float)rand()/(float)(RAND_MAX);
