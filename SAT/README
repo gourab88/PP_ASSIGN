@@ -1,0 +1,21 @@
+Complete 3SAT solver using CUDA
+Parallel Processing course assignment 2
+Author : Gourab Saha
+Contact : gourab1589@gmail.com
+
+
+To compile : nvcc sat.cu
+To run : ./a.out
+Dependencies : CUDA enabled GPU, CUDA toolkit 3.2 or above , CUDA driver
+
+
+This program will randomly generate
+Random generated boolean expression with
+25 variables and 20 clasues(with 3 literals)
+in Conjunctive normal form.
+
+It will check its satisfiability
+and if satisfiable it will output
+a single valid assignment.
+
+For more detaile please see 'report_3sat.pdf'

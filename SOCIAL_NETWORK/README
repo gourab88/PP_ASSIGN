@@ -1,0 +1,24 @@
+Stimulation of information diffusion in social network with 
+respect to time in social network using CUDA
+
+Parallel Processing course assignment 1
+
+Author : Gourab Saha
+Contact : gourab1589@gmail.com
+
+To compile :nvcc social_network.cu -lm
+To run : ./a.out
+Dependencies : CUDA enabled GPU, CUDA toolkit 4.0 or above , CUDA driver
+
+
+This program will model information diffusion in social network with 
+respect to time.
+
+Topic Arrival & Person arrival is modeled after
+possion arrival.
+It will output No of copies of each topic
+in each time interval to highlight the
+variation of popularity of topics over time.
+
+
+For more detaile please see 'report_social_network.pdf'.
